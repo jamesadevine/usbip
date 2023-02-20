@@ -29,6 +29,7 @@ pub use host::*;
 pub use interface::*;
 pub use setup::*;
 pub use util::*;
+pub mod ftdi;
 
 /// Main struct of a USB/IP server
 pub struct UsbIpServer {
