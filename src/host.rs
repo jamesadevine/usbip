@@ -21,10 +21,10 @@ impl UsbInterfaceHandler for UsbHostInterfaceHandler {
         setup: SetupPacket,
         req: &[u8],
     ) -> Result<Vec<u8>> {
-        debug!(
-            "To host device: ep={:?} setup={:?} req={:?}",
-            ep, setup, req
-        );
+        // debug!(
+        //     "To host device: ep={:?} setup={:?} req={:?}",
+        //     ep, setup, req
+        // );
         let mut buffer = vec![0u8; ep.max_packet_size as usize];
         let timeout = std::time::Duration::new(1, 0);
         let handle = self.handle.lock().unwrap();
@@ -105,26 +105,29 @@ impl UsbHostDeviceHandler {
 
 impl UsbDeviceHandler for UsbHostDeviceHandler {
     fn handle_urb(&mut self, setup: SetupPacket, req: &[u8]) -> Result<Vec<u8>> {
-        debug!("To host device: setup={:?} req={:?}", setup, req);
+        debug!("Host device handler: setup={:x?} req={:?}", setup, req);
         let mut buffer = [0u8; 1024];
         let timeout = std::time::Duration::new(1, 0);
         let handle = self.handle.lock().unwrap();
         // control
         if setup.request_type & 0x80 == 0 {
+            debug!("HDH: Write");
             // control out
-            handle
-                .write_control(
-                    setup.request_type,
-                    setup.request,
-                    setup.value,
-                    setup.index,
-                    req,
-                    timeout,
-                )
-                .ok();
+            match handle.write_control(
+                setup.request_type,
+                setup.request,
+                setup.value,
+                setup.index,
+                req,
+                timeout,
+            ) {
+                Ok(usize) => debug!("Wrote {usize} bytes."),
+                Err(e) => debug!("ERR: {e}"),
+            }
         } else {
+            debug!("HDH: Read");
             // control in
-            if let Ok(len) = handle.read_control(
+            match handle.read_control(
                 setup.request_type,
                 setup.request,
                 setup.value,
@@ -132,7 +135,8 @@ impl UsbDeviceHandler for UsbHostDeviceHandler {
                 &mut buffer,
                 timeout,
             ) {
-                return Ok(Vec::from(&buffer[..len]));
+                Ok(len) => return Ok(Vec::from(&buffer[..len])),
+                Err(e) => debug!("ERR COULD NOT READ {e}"),
             }
         }
         Ok(vec![])

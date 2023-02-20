@@ -428,6 +428,7 @@ impl UsbDevice {
                         return Ok(resp);
                     }
                     _ if setup_packet.request_type & 0xF == 0 && self.device_handler.is_some() => {
+                        debug!("DEVICE HANDLER IS SOME {:x?}", setup_packet);
                         // to device
                         // see https://www.beyondlogic.org/usbnutshell/usb6.shtml
                         let lock = self.device_handler.as_ref().unwrap();

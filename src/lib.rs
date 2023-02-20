@@ -1,5 +1,6 @@
 //! A library for running a USB/IP server
 
+use libc::ECONNRESET;
 use log::*;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
@@ -70,6 +71,11 @@ impl UsbIpServer {
                     .unwrap()
                     .set_auto_detach_kernel_driver(true)
                     .ok();
+                handle
+                    .lock()
+                    .unwrap()
+                    .claim_interface(intf.number())
+                    .unwrap();
                 let mut endpoints = vec![];
 
                 for ep_desc in intf_desc.endpoint_descriptors() {
@@ -263,7 +269,6 @@ async fn handler<T: AsyncReadExt + AsyncWriteExt + Unpin>(
                 }
             }
             [0x00, 0x00, 0x00, 0x01] => {
-                trace!("Got USBIP_CMD_SUBMIT");
                 let seq_num = socket.read_u32().await?;
                 let dev_id = socket.read_u32().await?;
                 let direction = socket.read_u32().await?;
@@ -278,12 +283,18 @@ async fn handler<T: AsyncReadExt + AsyncWriteExt + Unpin>(
                 let device = current_import_device.unwrap();
                 let real_ep = if direction == 0 { ep } else { ep | 0x80 };
                 let (usb_ep, intf) = device.find_ep(real_ep as u8).unwrap();
-                trace!("->Endpoint {:02x?}", usb_ep);
-                trace!("->Setup {:02x?}", setup);
+
                 let resp = device
                     .handle_urb(socket, usb_ep, intf, transfer_buffer_length, setup)
                     .await?;
-                trace!("<-Resp {:02x?}", resp);
+
+                if usb_ep.address != 0x85 {
+                    trace!("Got USBIP_CMD_SUBMIT [{seq_num}]");
+                    trace!("NUMBER OF PACKETS {_number_of_packets}");
+                    trace!("->Endpoint {:02x?}", usb_ep);
+                    trace!("->Setup {:02x?}", setup);
+                    trace!("<-Resp {:02x?}", resp);
+                }
 
                 // USBIP_RET_SUBMIT
                 // command
@@ -326,7 +337,7 @@ async fn handler<T: AsyncReadExt + AsyncWriteExt + Unpin>(
                 socket.write_u32(direction).await?;
                 socket.write_u32(ep).await?;
                 // status
-                socket.write_u32(0).await?;
+                socket.write_i32(-ECONNRESET).await?;
                 socket.write_all(&mut padding).await?;
             }
             _ => warn!("Got unknown command {:?}", command),
