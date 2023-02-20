@@ -1,5 +1,15 @@
-use super::*;
+use crate::{
+    util::socket_write_fixed_string, DescriptorType, EndpointAttributes, SetupPacket, UsbEndpoint,
+    UsbInterface, UsbInterfaceHandler, UsbSpeed, EP0_MAX_PACKET_SIZE,
+};
+use log::*;
+use num_traits::FromPrimitive;
 use rusb::Version as rusbVersion;
+use std::any::Any;
+use std::collections::HashMap;
+use std::io::Result;
+use std::sync::{Arc, Mutex};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[derive(Clone, Default)]
 pub struct Version {
@@ -193,10 +203,10 @@ impl UsbDevice {
         transfer_buffer_length: u32,
         setup: [u8; 8],
     ) -> Result<Vec<u8>> {
-        use DescriptorType::*;
-        use Direction::*;
-        use EndpointAttributes::*;
-        use StandardRequest::*;
+        use crate::DescriptorType::*;
+        use crate::Direction::*;
+        use crate::EndpointAttributes::*;
+        use crate::StandardRequest::*;
 
         // parse setup
         let setup_packet = SetupPacket::parse(&setup);

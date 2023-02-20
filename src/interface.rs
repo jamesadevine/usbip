@@ -1,4 +1,7 @@
-use super::*;
+use crate::{SetupPacket, UsbEndpoint};
+use std::any::Any;
+use std::io::Result;
+use std::sync::{Arc, Mutex};
 
 /// Represent a USB interface
 #[derive(Clone)]

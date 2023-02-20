@@ -1,5 +1,13 @@
 //! Host USB
-use super::*;
+use crate::{
+    EndpointAttributes, SetupPacket, UsbDeviceHandler, UsbEndpoint, UsbInterface,
+    UsbInterfaceHandler,
+};
+use log::*;
+use rusb::{DeviceHandle, Direction, GlobalContext};
+use std::any::Any;
+use std::sync::{Arc, Mutex};
+use std::io::{Result};
 
 /// A handler to pass requests to a USB device of the host
 #[derive(Clone)]

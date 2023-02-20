@@ -1,6 +1,10 @@
 //! Implement CDC(Communications) device
-use super::*;
-
+use crate::{
+    Direction, EndpointAttributes, SetupPacket, UsbEndpoint, UsbInterface, UsbInterfaceHandler,
+};
+use log::*;
+use std::any::Any;
+use std::io::Result;
 /// A handler of a CDC ACM(Abstract Control Model)
 #[derive(Clone)]
 pub struct UsbCdcAcmHandler {
@@ -99,7 +103,7 @@ impl UsbInterfaceHandler for UsbCdcAcmHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::{cdc::UsbCdcAcmHandler, interface::UsbInterfaceHandler, verify_descriptor};
 
     #[test]
     fn desc_verify() {

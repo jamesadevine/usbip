@@ -1,5 +1,13 @@
 //! Implement HID device
-use super::*;
+use crate::{
+    Direction, SetupPacket, StandardRequest, UsbEndpoint, UsbInterface, UsbInterfaceHandler,
+};
+use log::*;
+use num_derive::FromPrimitive;
+use num_traits::FromPrimitive;
+use std::any::Any;
+use std::collections::VecDeque;
+use std::io::Result;
 
 // reference:
 // HID 1.11: https://www.usb.org/sites/default/files/documents/hid1_11.pdf
@@ -162,7 +170,7 @@ pub enum HidDescriptorType {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::{hid::UsbHidKeyboardHandler, interface::UsbInterfaceHandler, verify_descriptor};
 
     #[test]
     fn desc_verify() {
