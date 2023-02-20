@@ -28,9 +28,9 @@ impl From<rusbVersion> for Version {
     }
 }
 
-impl Into<rusbVersion> for Version {
-    fn into(self) -> rusbVersion {
-        rusbVersion(self.major, self.minor, self.patch)
+impl From<Version> for rusbVersion {
+    fn from(val: Version) -> Self {
+        rusbVersion(val.major, val.minor, val.patch)
     }
 }
 
@@ -67,8 +67,8 @@ pub struct UsbDevice {
 impl UsbDevice {
     pub fn new(index: u32) -> Self {
         let mut res = Self {
-            path: format!("/sys/device/usbip/{}", index),
-            bus_id: format!("{}", index),
+            path: format!("/sys/device/usbip/{index}"),
+            bus_id: format!("{index}"),
             dev_num: index,
             speed: UsbSpeed::High as u32,
             ep0_in: UsbEndpoint {
@@ -236,8 +236,8 @@ impl UsbDevice {
                                 let mut desc = vec![
                                     0x12,         // bLength
                                     Device as u8, // bDescriptorType: Device
-                                    self.usb_version.minor as u8,
-                                    self.usb_version.major as u8, // bcdUSB: USB 2.0
+                                    self.usb_version.minor,
+                                    self.usb_version.major, // bcdUSB: USB 2.0
                                     self.device_class,            // bDeviceClass
                                     self.device_subclass,         // bDeviceSubClass
                                     self.device_protocol,         // bDeviceProtocol
@@ -246,8 +246,8 @@ impl UsbDevice {
                                     (self.vendor_id >> 8) as u8,
                                     self.product_id as u8, // idProduct
                                     (self.product_id >> 8) as u8,
-                                    self.device_bcd.minor as u8, // bcdDevice
-                                    self.device_bcd.major as u8,
+                                    self.device_bcd.minor, // bcdDevice
+                                    self.device_bcd.major,
                                     self.string_manufacturer, // iManufacturer
                                     self.string_product,      // iProduct
                                     self.string_serial,       // iSerial
@@ -258,7 +258,7 @@ impl UsbDevice {
                                 if setup_packet.length < desc.len() as u16 {
                                     desc.resize(setup_packet.length as usize, 0);
                                 }
-                                return Ok(desc);
+                                Ok(desc)
                             }
                             Some(BOS) => {
                                 debug!("Get BOS descriptor");
@@ -273,7 +273,7 @@ impl UsbDevice {
                                 if setup_packet.length < desc.len() as u16 {
                                     desc.resize(setup_packet.length as usize, 0);
                                 }
-                                return Ok(desc);
+                                Ok(desc)
                             }
                             Some(Configuration) => {
                                 debug!("Get configuration descriptor");
@@ -327,7 +327,7 @@ impl UsbDevice {
                                 if setup_packet.length < desc.len() as u16 {
                                     desc.resize(setup_packet.length as usize, 0);
                                 }
-                                return Ok(desc);
+                                Ok(desc)
                             }
                             Some(String) => {
                                 debug!("Get string descriptor");
@@ -344,7 +344,7 @@ impl UsbDevice {
                                     if setup_packet.length < desc.len() as u16 {
                                         desc.resize(setup_packet.length as usize, 0);
                                     }
-                                    return Ok(desc);
+                                    Ok(desc)
                                 } else {
                                     let s = &self.string_pool[&index];
                                     let bytes: Vec<u16> = s.encode_utf16().collect();
@@ -361,7 +361,7 @@ impl UsbDevice {
                                     if setup_packet.length < desc.len() as u16 {
                                         desc.resize(setup_packet.length as usize, 0);
                                     }
-                                    return Ok(desc);
+                                    Ok(desc)
                                 }
                             }
                             Some(DeviceQualifier) => {
@@ -369,8 +369,8 @@ impl UsbDevice {
                                 let mut desc = vec![
                                     0x0A,                  // bLength
                                     DeviceQualifier as u8, // bDescriptorType: Device Qualifier
-                                    self.usb_version.minor as u8,
-                                    self.usb_version.major as u8,
+                                    self.usb_version.minor,
+                                    self.usb_version.major,
                                     self.device_class,    // bDeviceClass
                                     self.device_subclass, // bDeviceSUbClass
                                     self.device_protocol, // bDeviceProtocol
@@ -383,11 +383,11 @@ impl UsbDevice {
                                 if setup_packet.length < desc.len() as u16 {
                                     desc.resize(setup_packet.length as usize, 0);
                                 }
-                                return Ok(desc);
+                                Ok(desc)
                             }
                             _ => {
                                 warn!("unknown desc type: {:x?}", setup_packet);
-                                return Ok(vec![]);
+                                Ok(vec![])
                             }
                         }
                     }
@@ -398,14 +398,14 @@ impl UsbDevice {
                         let intf = &self.interfaces[setup_packet.index as usize & 0xFF];
                         let mut handler = intf.handler.lock().unwrap();
                         let resp = handler.handle_urb(intf, ep, setup_packet, &out_data)?;
-                        return Ok(resp);
+                        Ok(resp)
                     }
                     _ if setup_packet.request_type & 0xF == 0 && self.device_handler.is_some() => {
                         // to device
                         // see https://www.beyondlogic.org/usbnutshell/usb6.shtml
                         let lock = self.device_handler.as_ref().unwrap();
                         let mut handler = lock.lock().unwrap();
-                        return Ok(handler.handle_urb(setup_packet, &out_data)?);
+                        handler.handle_urb(setup_packet, &out_data)
                     }
                     _ => unimplemented!("control in"),
                 }
@@ -426,7 +426,7 @@ impl UsbDevice {
                         if setup_packet.length < desc.len() as u16 {
                             desc.resize(setup_packet.length as usize, 0);
                         }
-                        return Ok(desc);
+                        Ok(desc)
                     }
                     _ if setup_packet.request_type & 0xF == 1 => {
                         // to interface
@@ -435,7 +435,7 @@ impl UsbDevice {
                         let intf = &self.interfaces[setup_packet.index as usize & 0xFF];
                         let mut handler = intf.handler.lock().unwrap();
                         let resp = handler.handle_urb(intf, ep, setup_packet, &out_data)?;
-                        return Ok(resp);
+                        Ok(resp)
                     }
                     _ if setup_packet.request_type & 0xF == 0 && self.device_handler.is_some() => {
                         debug!("DEVICE HANDLER IS SOME {:x?}", setup_packet);
@@ -443,7 +443,7 @@ impl UsbDevice {
                         // see https://www.beyondlogic.org/usbnutshell/usb6.shtml
                         let lock = self.device_handler.as_ref().unwrap();
                         let mut handler = lock.lock().unwrap();
-                        return Ok(handler.handle_urb(setup_packet, &out_data)?);
+                        handler.handle_urb(setup_packet, &out_data)
                     }
                     _ => unimplemented!("control out"),
                 }
@@ -453,7 +453,7 @@ impl UsbDevice {
                 let intf = intf.unwrap();
                 let mut handler = intf.handler.lock().unwrap();
                 let resp = handler.handle_urb(intf, ep, setup_packet, &out_data)?;
-                return Ok(resp);
+                Ok(resp)
             }
             _ => unimplemented!("transfer to {:?}", ep),
         }

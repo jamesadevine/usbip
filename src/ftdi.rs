@@ -75,7 +75,7 @@ impl FtdiDeviceHandler {
                 /// bmAttributes
                 attributes: EndpointAttributes::Bulk as u8,
                 /// wMaxPacketSize
-                max_packet_size: EP_MAX_PACKET_SIZE as u16,
+                max_packet_size: EP_MAX_PACKET_SIZE,
                 /// bInterval
                 interval: 0,
             });
@@ -86,7 +86,7 @@ impl FtdiDeviceHandler {
                 /// bmAttributes
                 attributes: EndpointAttributes::Bulk as u8,
                 /// wMaxPacketSize
-                max_packet_size: EP_MAX_PACKET_SIZE as u16,
+                max_packet_size: EP_MAX_PACKET_SIZE,
                 /// bInterval
                 interval: 0,
             })
@@ -103,7 +103,7 @@ impl UsbDeviceHandler for FtdiDeviceHandler {
                 // 1 ms
                 FTDISIORequestTypes::GetLatencyTimer => Ok(vec![0x01]),
                 request => {
-                    println!("Unhandled: {:?}", request);
+                    println!("Unhandled: {request:?}");
                     Ok(vec![])
                 }
             },

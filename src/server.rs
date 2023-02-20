@@ -2,14 +2,8 @@ use crate::{
     socket::handler, EndpointAttributes, UsbDevice, UsbEndpoint, UsbHostDeviceHandler,
     UsbHostInterfaceHandler, UsbInterface, UsbInterfaceHandler,
 };
-use libc::ECONNRESET;
 use log::*;
-use num_derive::FromPrimitive;
-use num_traits::FromPrimitive;
 use rusb::*;
-use std::any::Any;
-use std::collections::{HashMap, VecDeque};
-use std::io::{ErrorKind, Result};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
@@ -32,7 +26,7 @@ impl UsbIpServer {
             let open_device = match dev.open() {
                 Ok(dev) => dev,
                 Err(err) => {
-                    println!("Impossible to share {:?}: {}", dev, err);
+                    println!("Impossible to share {dev:?}: {err}");
                     continue;
                 }
             };
@@ -194,8 +188,6 @@ impl UsbIpServer {
         }
     }
 }
-
-struct UsbIpRequest {}
 
 /// Spawn a USB/IP server at `addr` using [TcpListener]
 pub async fn server(addr: SocketAddr, server: UsbIpServer) {

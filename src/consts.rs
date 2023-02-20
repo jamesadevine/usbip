@@ -1,5 +1,4 @@
 use num_derive::FromPrimitive;
-use num_traits::FromPrimitive;
 
 /// A list of known USB speeds
 #[derive(Copy, Clone, Debug)]

@@ -2,7 +2,7 @@ use crate::server::UsbIpServer;
 use libc::ECONNRESET;
 use log::*;
 use std::io::{ErrorKind, Result};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub async fn handler<T: AsyncReadExt + AsyncWriteExt + Unpin>(
@@ -135,11 +135,4 @@ pub async fn handler<T: AsyncReadExt + AsyncWriteExt + Unpin>(
             _ => warn!("Got unknown command {:?}", command),
         }
     }
-}
-
-pub async fn write<T: AsyncReadExt + AsyncWriteExt + Unpin>(
-    mut socket: &mut T,
-    server: Arc<UsbIpServer>,
-) -> Result<()> {
-    Ok(())
 }
