@@ -1,12 +1,13 @@
 use crate::{
-    socket::handler, EndpointAttributes, UsbDevice, UsbEndpoint, UsbHostDeviceHandler,
-    UsbHostInterfaceHandler, UsbInterface, UsbInterfaceHandler,
+    socket::{reader, writer},
+    EndpointAttributes, UsbDevice, UsbEndpoint, UsbHostDeviceHandler, UsbHostInterfaceHandler,
+    UsbInterface, UsbInterfaceHandler,
 };
 use log::*;
 use rusb::*;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
-use tokio::net::TcpListener;
+use std::sync::Arc;
+use tokio::{net::TcpListener, sync::Mutex};
 
 /// Main struct of a USB/IP server
 pub struct UsbIpServer {
@@ -30,7 +31,7 @@ impl UsbIpServer {
                     continue;
                 }
             };
-            let handle = Arc::new(Mutex::new(open_device));
+            let handle = Arc::new(std::sync::Mutex::new(open_device));
             let desc = dev.device_descriptor().unwrap();
             let cfg = dev.active_config_descriptor().unwrap();
             let mut interfaces = vec![];
@@ -63,10 +64,10 @@ impl UsbIpServer {
                     });
                 }
 
-                let handler = Arc::new(Mutex::new(Box::new(UsbHostInterfaceHandler::new(
-                    handle.clone(),
-                ))
-                    as Box<dyn UsbInterfaceHandler + Send>));
+                let handler = Arc::new(std::sync::Mutex::new(
+                    Box::new(UsbHostInterfaceHandler::new(handle.clone()))
+                        as Box<dyn UsbInterfaceHandler + Send>,
+                ));
                 interfaces.push(UsbInterface {
                     interface_class: intf_desc.class_code(),
                     interface_subclass: intf_desc.sub_class_code(),
@@ -114,9 +115,9 @@ impl UsbIpServer {
                     interval: 0,
                 },
                 interfaces,
-                device_handler: Some(Arc::new(Mutex::new(Box::new(UsbHostDeviceHandler::new(
-                    handle.clone(),
-                ))))),
+                device_handler: Some(Arc::new(std::sync::Mutex::new(Box::new(
+                    UsbHostDeviceHandler::new(handle.clone()),
+                )))),
                 usb_version: desc.usb_version().into(),
                 ..UsbDevice::default()
             };
@@ -189,6 +190,23 @@ impl UsbIpServer {
     }
 }
 
+#[derive(Clone, PartialEq)]
+pub enum UsbIpCommand {
+    ReqDevlist,
+    ReqImport,
+    CmdSubmit,
+    CmdUnlink,
+}
+
+#[derive(Clone)]
+pub struct UsbIpPacket {
+    pub status: u32,
+    pub sequence_number: u32,
+    pub command: Vec<u8>,
+    pub enum_command: UsbIpCommand,
+    pub data: Vec<u8>,
+}
+
 /// Spawn a USB/IP server at `addr` using [TcpListener]
 pub async fn server(addr: SocketAddr, server: UsbIpServer) {
     let listener = TcpListener::bind(addr).await.expect("bind to addr");
@@ -199,10 +217,20 @@ pub async fn server(addr: SocketAddr, server: UsbIpServer) {
             match listener.accept().await {
                 Ok((mut socket, _addr)) => {
                     info!("Got connection from {:?}", socket.peer_addr());
+
+                    let packet_queue: Arc<Mutex<Vec<UsbIpPacket>>> = Arc::new(Mutex::new(vec![]));
                     let new_server = usbip_server.clone();
-                    tokio::spawn(async move {
-                        let res = handler(&mut socket, new_server).await;
-                        info!("Handler ended with {:?}", res);
+                    let pqueue = packet_queue.clone();
+                    let (mut sock_reader, mut sock_writer) = tokio::io::split(socket);
+                    let t = tokio::spawn(async move {
+                        let res = reader(&mut sock_reader, new_server, pqueue).await;
+                        info!("Reader ended with {:?}", res);
+                    });
+                    let new_server = usbip_server.clone();
+                    let pqueue = packet_queue.clone();
+                    let t1 = tokio::spawn(async move {
+                        let res = writer(&mut sock_writer, new_server, pqueue).await;
+                        info!("Writer ended with {:?}", res);
                     });
                 }
                 Err(err) => {

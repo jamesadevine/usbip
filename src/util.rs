@@ -1,7 +1,7 @@
 use std::io::Result;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-pub(crate) async fn socket_write_fixed_string<T: AsyncReadExt + AsyncWriteExt + Unpin>(
+pub(crate) async fn socket_write_fixed_string<T: AsyncWriteExt + Unpin>(
     socket: &mut T,
     s: &String,
     len: usize,

@@ -16,6 +16,7 @@ num-traits = "0.2.15"
 num-derive = "0.3.3"
 rusb = "0.9.1"
 libc = "0.2.139"
+byteorder = "1"
 
 [dev-dependencies]
 tokio = { version = "1.22.0", features = ["full"] }

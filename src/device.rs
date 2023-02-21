@@ -153,10 +153,7 @@ impl UsbDevice {
         }
     }
 
-    pub(crate) async fn write_dev<T: AsyncReadExt + AsyncWriteExt + Unpin>(
-        &self,
-        socket: &mut T,
-    ) -> Result<()> {
+    pub(crate) async fn write_dev<T: AsyncWriteExt + Unpin>(&self, socket: &mut T) -> Result<()> {
         socket_write_fixed_string(socket, &self.path, 256).await?;
         socket_write_fixed_string(socket, &self.bus_id, 32).await?;
 
@@ -179,7 +176,7 @@ impl UsbDevice {
         Ok(())
     }
 
-    pub(crate) async fn write_dev_with_interfaces<T: AsyncReadExt + AsyncWriteExt + Unpin>(
+    pub(crate) async fn write_dev_with_interfaces<T: AsyncWriteExt + Unpin>(
         &self,
         socket: &mut T,
     ) -> Result<()> {
@@ -195,42 +192,26 @@ impl UsbDevice {
         Ok(())
     }
 
-    pub(crate) async fn handle_urb<T: AsyncReadExt + AsyncWriteExt + Unpin>(
+    pub(crate) async fn handle_urb(
         &self,
-        socket: &mut T,
         ep: UsbEndpoint,
         intf: Option<&UsbInterface>,
-        transfer_buffer_length: u32,
-        setup: [u8; 8],
+        setup: SetupPacket,
+        request: Vec<u8>,
     ) -> Result<Vec<u8>> {
         use crate::DescriptorType::*;
         use crate::Direction::*;
         use crate::EndpointAttributes::*;
         use crate::StandardRequest::*;
 
-        // parse setup
-        let setup_packet = SetupPacket::parse(&setup);
-
-        // read data from socket for OUT
-        let out_data = if let Out = ep.direction() {
-            let mut data = vec![0u8; transfer_buffer_length as usize];
-            socket.read_exact(&mut data).await?;
-            data
-        } else {
-            vec![]
-        };
-
         match (FromPrimitive::from_u8(ep.attributes), ep.direction()) {
             (Some(Control), In) => {
                 // control in
-                debug!("Control IN setup={:x?}", setup_packet);
-                match (
-                    setup_packet.request_type,
-                    FromPrimitive::from_u8(setup_packet.request),
-                ) {
+                debug!("Control IN setup={:x?}", setup);
+                match (setup.request_type, FromPrimitive::from_u8(setup.request)) {
                     (0b10000000, Some(GetDescriptor)) => {
                         // high byte: type
-                        match FromPrimitive::from_u16(setup_packet.value >> 8) {
+                        match FromPrimitive::from_u16(setup.value >> 8) {
                             Some(Device) => {
                                 debug!("Get device descriptor");
                                 let mut desc = vec![
@@ -238,11 +219,11 @@ impl UsbDevice {
                                     Device as u8, // bDescriptorType: Device
                                     self.usb_version.minor,
                                     self.usb_version.major, // bcdUSB: USB 2.0
-                                    self.device_class,            // bDeviceClass
-                                    self.device_subclass,         // bDeviceSubClass
-                                    self.device_protocol,         // bDeviceProtocol
+                                    self.device_class,      // bDeviceClass
+                                    self.device_subclass,   // bDeviceSubClass
+                                    self.device_protocol,   // bDeviceProtocol
                                     self.ep0_in.max_packet_size as u8, // bMaxPacketSize0
-                                    self.vendor_id as u8,         // idVendor
+                                    self.vendor_id as u8,   // idVendor
                                     (self.vendor_id >> 8) as u8,
                                     self.product_id as u8, // idProduct
                                     (self.product_id >> 8) as u8,
@@ -255,8 +236,8 @@ impl UsbDevice {
                                 ];
 
                                 // requested len too short: wLength < real length
-                                if setup_packet.length < desc.len() as u16 {
-                                    desc.resize(setup_packet.length as usize, 0);
+                                if setup.length < desc.len() as u16 {
+                                    desc.resize(setup.length as usize, 0);
                                 }
                                 Ok(desc)
                             }
@@ -270,8 +251,8 @@ impl UsbDevice {
                                 ];
 
                                 // requested len too short: wLength < real length
-                                if setup_packet.length < desc.len() as u16 {
-                                    desc.resize(setup_packet.length as usize, 0);
+                                if setup.length < desc.len() as u16 {
+                                    desc.resize(setup.length as usize, 0);
                                 }
                                 Ok(desc)
                             }
@@ -324,14 +305,14 @@ impl UsbDevice {
                                 desc[3] = (len >> 8) as u8;
 
                                 // requested len too short: wLength < real length
-                                if setup_packet.length < desc.len() as u16 {
-                                    desc.resize(setup_packet.length as usize, 0);
+                                if setup.length < desc.len() as u16 {
+                                    desc.resize(setup.length as usize, 0);
                                 }
                                 Ok(desc)
                             }
                             Some(String) => {
                                 debug!("Get string descriptor");
-                                let index = setup_packet.value as u8;
+                                let index = setup.value as u8;
                                 if index == 0 {
                                     // language ids
                                     let mut desc = vec![
@@ -341,8 +322,8 @@ impl UsbDevice {
                                         0x04, // bLANGID, en-US
                                     ];
                                     // requested len too short: wLength < real length
-                                    if setup_packet.length < desc.len() as u16 {
-                                        desc.resize(setup_packet.length as usize, 0);
+                                    if setup.length < desc.len() as u16 {
+                                        desc.resize(setup.length as usize, 0);
                                     }
                                     Ok(desc)
                                 } else {
@@ -358,8 +339,8 @@ impl UsbDevice {
                                     }
 
                                     // requested len too short: wLength < real length
-                                    if setup_packet.length < desc.len() as u16 {
-                                        desc.resize(setup_packet.length as usize, 0);
+                                    if setup.length < desc.len() as u16 {
+                                        desc.resize(setup.length as usize, 0);
                                     }
                                     Ok(desc)
                                 }
@@ -380,70 +361,67 @@ impl UsbDevice {
                                 ];
 
                                 // requested len too short: wLength < real length
-                                if setup_packet.length < desc.len() as u16 {
-                                    desc.resize(setup_packet.length as usize, 0);
+                                if setup.length < desc.len() as u16 {
+                                    desc.resize(setup.length as usize, 0);
                                 }
                                 Ok(desc)
                             }
                             _ => {
-                                warn!("unknown desc type: {:x?}", setup_packet);
+                                warn!("unknown desc type: {:x?}", setup);
                                 Ok(vec![])
                             }
                         }
                     }
-                    _ if setup_packet.request_type & 0xF == 1 => {
+                    _ if setup.request_type & 0xF == 1 => {
                         // to interface
                         // see https://www.beyondlogic.org/usbnutshell/usb6.shtml
                         // only low 8 bits are valid
-                        let intf = &self.interfaces[setup_packet.index as usize & 0xFF];
+                        let intf = &self.interfaces[setup.index as usize & 0xFF];
                         let mut handler = intf.handler.lock().unwrap();
-                        let resp = handler.handle_urb(intf, ep, setup_packet, &out_data)?;
+                        let resp = handler.handle_urb(intf, ep, setup, &request)?;
                         Ok(resp)
                     }
-                    _ if setup_packet.request_type & 0xF == 0 && self.device_handler.is_some() => {
+                    _ if setup.request_type & 0xF == 0 && self.device_handler.is_some() => {
                         // to device
                         // see https://www.beyondlogic.org/usbnutshell/usb6.shtml
                         let lock = self.device_handler.as_ref().unwrap();
                         let mut handler = lock.lock().unwrap();
-                        handler.handle_urb(setup_packet, &out_data)
+                        handler.handle_urb(setup, &request)
                     }
                     _ => unimplemented!("control in"),
                 }
             }
             (Some(Control), Out) => {
                 // control out
-                debug!("Control OUT setup={:x?}", setup_packet);
-                match (
-                    setup_packet.request_type,
-                    FromPrimitive::from_u8(setup_packet.request),
-                ) {
+                debug!("Control OUT setup={:x?}", setup);
+                match (setup.request_type, FromPrimitive::from_u8(setup.request)) {
                     (0b00000000, Some(SetConfiguration)) => {
                         let mut desc = vec![
                             self.configuration_value, // bConfigurationValue
                         ];
 
                         // requested len too short: wLength < real length
-                        if setup_packet.length < desc.len() as u16 {
-                            desc.resize(setup_packet.length as usize, 0);
+                        if setup.length < desc.len() as u16 {
+                            desc.resize(setup.length as usize, 0);
                         }
                         Ok(desc)
                     }
-                    _ if setup_packet.request_type & 0xF == 1 => {
+                    _ if setup.request_type & 0xF == 1 => {
                         // to interface
                         // see https://www.beyondlogic.org/usbnutshell/usb6.shtml
                         // only low 8 bits are valid
-                        let intf = &self.interfaces[setup_packet.index as usize & 0xFF];
+                        let intf = &self.interfaces[setup.index as usize & 0xFF];
                         let mut handler = intf.handler.lock().unwrap();
-                        let resp = handler.handle_urb(intf, ep, setup_packet, &out_data)?;
+                        let resp = handler.handle_urb(intf, ep, setup, &request)?;
                         Ok(resp)
                     }
-                    _ if setup_packet.request_type & 0xF == 0 && self.device_handler.is_some() => {
-                        debug!("DEVICE HANDLER IS SOME {:x?}", setup_packet);
+                    _ if setup.request_type & 0xF == 0 && self.device_handler.is_some() => {
+                        debug!("DEVICE HANDLER IS SOME {:x?}", setup);
                         // to device
                         // see https://www.beyondlogic.org/usbnutshell/usb6.shtml
                         let lock = self.device_handler.as_ref().unwrap();
                         let mut handler = lock.lock().unwrap();
-                        handler.handle_urb(setup_packet, &out_data)
+                        handler.handle_urb(setup, &request)
                     }
                     _ => unimplemented!("control out"),
                 }
@@ -452,7 +430,7 @@ impl UsbDevice {
                 // others
                 let intf = intf.unwrap();
                 let mut handler = intf.handler.lock().unwrap();
-                let resp = handler.handle_urb(intf, ep, setup_packet, &out_data)?;
+                let resp = handler.handle_urb(intf, ep, setup, &request)?;
                 Ok(resp)
             }
             _ => unimplemented!("transfer to {:?}", ep),
