@@ -168,8 +168,6 @@ pub async fn writer<T: AsyncWriteExt + Unpin>(
             go_to_sleep += 1;
         }
 
-        queue.remove(0);
-
         // explicitly drop the lock so reader can access the queue.
         drop(queue);
 
