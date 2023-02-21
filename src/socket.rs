@@ -10,13 +10,13 @@ use tokio::sync::Mutex;
 use tokio::time::sleep;
 
 pub async fn reader<T: AsyncReadExt + Unpin>(
-    socket: &mut T,
+    sock_reader: &mut T,
     _server: Arc<UsbIpServer>,
     packet_queue: Arc<Mutex<Vec<UsbIpPacket>>>,
 ) -> Result<()> {
     loop {
         let mut command = [0u8; 4];
-        if let Err(err) = socket.read_exact(&mut command).await {
+        if let Err(err) = sock_reader.read_exact(&mut command).await {
             if err.kind() == ErrorKind::UnexpectedEof {
                 info!("Remote closed the connection");
                 return Ok(());
@@ -28,7 +28,7 @@ pub async fn reader<T: AsyncReadExt + Unpin>(
         match command {
             [0x01, 0x11, 0x80, 0x05] => {
                 trace!("Got OP_REQ_DEVLIST");
-                let status = socket.read_u32().await?;
+                let status = sock_reader.read_u32().await?;
                 packet_queue.lock().await.push(UsbIpPacket {
                     sequence_number: 0,
                     status,
@@ -39,9 +39,9 @@ pub async fn reader<T: AsyncReadExt + Unpin>(
             }
             [0x01, 0x11, 0x80, 0x03] => {
                 trace!("Got OP_REQ_IMPORT");
-                let status = socket.read_u32().await?;
+                let status = sock_reader.read_u32().await?;
                 let mut data = [0u8; 32];
-                socket.read_exact(&mut data).await?;
+                sock_reader.read_exact(&mut data).await?;
                 packet_queue.lock().await.push(UsbIpPacket {
                     sequence_number: 0,
                     status,
@@ -51,15 +51,15 @@ pub async fn reader<T: AsyncReadExt + Unpin>(
                 });
             }
             [0x00, 0x00, 0x00, 0x01] => {
-                trace!("Got CMD_SUBMIT");
-                let seq_num = socket.read_u32().await?;
+                trace!("[R][START] CMD_SUBMIT");
+                let seq_num = sock_reader.read_u32().await?;
                 let mut data = [0u8; 40];
 
-                socket.read_exact(&mut data).await?;
+                sock_reader.read_exact(&mut data).await?;
 
                 let mut cursor = Cursor::new(&data);
                 let _dev_id = cursor.read_u32().await.unwrap_or_default();
-                let _direction = cursor.read_u32().await.unwrap_or_default();
+                let direction = cursor.read_u32().await.unwrap_or_default();
                 let _ep = cursor.read_u32().await.unwrap_or_default();
                 let _transfer_flags = cursor.read_u32().await.unwrap_or_default();
                 let transfer_buffer_length = cursor.read_u32().await.unwrap_or_default();
@@ -67,10 +67,14 @@ pub async fn reader<T: AsyncReadExt + Unpin>(
                 let _number_of_packets = cursor.read_u32().await.unwrap_or_default();
                 let _interval = cursor.read_u32().await.unwrap_or_default();
 
-                // todo: might need to check direction here.
                 // if direction is out (0), read additional data.
-                let mut request_buffer = vec![0u8; transfer_buffer_length as usize];
-                socket.read_exact(&mut request_buffer).await?;
+                let mut request_buffer = if direction == 0 {
+                    let mut request_buffer = vec![0u8; transfer_buffer_length as usize];
+                    sock_reader.read_exact(&mut request_buffer).await?;
+                    request_buffer
+                } else {
+                    vec![]
+                };
 
                 let mut data = data.to_vec();
                 data.append(&mut request_buffer);
@@ -82,12 +86,13 @@ pub async fn reader<T: AsyncReadExt + Unpin>(
                     enum_command: UsbIpCommand::CmdSubmit,
                     data,
                 });
+                trace!("[R][END] CMD_SUBMIT");
             }
             [0x00, 0x00, 0x00, 0x02] => {
-                trace!("Got USBIP_CMD_UNLINK");
-                let seq_num = socket.read_u32().await?;
+                trace!("[R][START] CMD_UNLINK");
+                let seq_num = sock_reader.read_u32().await?;
                 let mut data = [0u8; 16];
-                socket.read_exact(&mut data).await?;
+                sock_reader.read_exact(&mut data).await?;
                 packet_queue.lock().await.push(UsbIpPacket {
                     sequence_number: seq_num,
                     status: 0,
@@ -98,7 +103,8 @@ pub async fn reader<T: AsyncReadExt + Unpin>(
 
                 // 24 bytes of struct padding
                 let mut padding = [0u8; 6 * 4];
-                socket.read_exact(&mut padding).await?;
+                sock_reader.read_exact(&mut padding).await?;
+                trace!("[R][END] CMD_UNLINK");
             }
             _ => warn!("Got unknown command {:?}", command),
         }
@@ -106,7 +112,7 @@ pub async fn reader<T: AsyncReadExt + Unpin>(
 }
 
 pub async fn writer<T: AsyncWriteExt + Unpin>(
-    mut socket: &mut T,
+    mut sock_writer: &mut T,
     server: Arc<UsbIpServer>,
     packet_queue: Arc<Mutex<Vec<UsbIpPacket>>>,
 ) -> Result<()> {
@@ -141,7 +147,7 @@ pub async fn writer<T: AsyncWriteExt + Unpin>(
                 queue.remove(position);
             }
 
-            // remove the unsubmit packet
+            // remove the unsubmit packet too!
             if let Some(position) = queue
                 .iter_mut()
                 .position(|pkt| pkt.sequence_number == usubmit_pkt.sequence_number)
@@ -150,15 +156,15 @@ pub async fn writer<T: AsyncWriteExt + Unpin>(
             }
 
             // USBIP_CMD_UNLINK response
-            socket.write_u32(0x4).await?;
-            socket.write_u32(usubmit_pkt.sequence_number).await?;
-            socket.write_u32(dev_id).await?;
-            socket.write_u32(direction).await?;
-            socket.write_u32(ep).await?;
-            socket.write_i32(status_code).await?;
+            sock_writer.write_u32(0x4).await?;
+            sock_writer.write_u32(usubmit_pkt.sequence_number).await?;
+            sock_writer.write_u32(dev_id).await?;
+            sock_writer.write_u32(direction).await?;
+            sock_writer.write_u32(ep).await?;
+            sock_writer.write_i32(status_code).await?;
 
             let padding = [0u8; 6 * 4];
-            socket.write_all(&padding).await?;
+            sock_writer.write_all(&padding).await?;
         }
 
         let mut current_pkt = None;
@@ -176,17 +182,17 @@ pub async fn writer<T: AsyncWriteExt + Unpin>(
             match current_pkt.enum_command {
                 UsbIpCommand::ReqDevlist => {
                     // OP_REP_DEVLIST
-                    trace!("Got OP_REQ_DEVLIST");
-                    socket.write_u32(0x01110005).await?;
-                    socket.write_u32(0).await?;
-                    socket.write_u32(server.devices.len() as u32).await?;
+                    trace!("[W][START] OP_REQ_DEVLIST");
+                    sock_writer.write_u32(0x01110005).await?;
+                    sock_writer.write_u32(0).await?;
+                    sock_writer.write_u32(server.devices.len() as u32).await?;
                     for dev in &server.devices {
-                        dev.write_dev_with_interfaces(&mut socket).await?;
+                        dev.write_dev_with_interfaces(&mut sock_writer).await?;
                     }
-                    trace!("Sent OP_REP_DEVLIST");
+                    trace!("[W][END] REQ_DEVLIST");
                 }
                 UsbIpCommand::ReqImport => {
-                    trace!("Got OP_REQ_IMPORT");
+                    trace!("[W][START] OP_REQ_IMPORT");
                     let bus_id = &current_pkt.data;
                     assert_eq!(bus_id.len(), 32);
                     current_import_device = None;
@@ -200,16 +206,17 @@ pub async fn writer<T: AsyncWriteExt + Unpin>(
                         }
                     }
 
-                    socket.write_u32(0x01110003).await?;
+                    sock_writer.write_u32(0x01110003).await?;
                     if let Some(dev) = current_import_device {
-                        socket.write_u32(0).await?;
-                        dev.write_dev(&mut socket).await?;
+                        sock_writer.write_u32(0).await?;
+                        dev.write_dev(&mut sock_writer).await?;
                     } else {
-                        socket.write_u32(1).await?;
+                        sock_writer.write_u32(1).await?;
                     }
-                    trace!("Sent OP_REP_IMPORT");
+                    trace!("[W][END] REQ_IMPORT");
                 }
                 UsbIpCommand::CmdSubmit => {
+                    trace!("[W][START] CMD_SUBMIT [{}]", current_pkt.sequence_number);
                     let mut cursor = Cursor::new(&current_pkt.data);
                     let dev_id = cursor.read_u32().await.unwrap_or_default();
                     let direction = cursor.read_u32().await.unwrap_or_default();
@@ -224,46 +231,48 @@ pub async fn writer<T: AsyncWriteExt + Unpin>(
 
                     let setup_packet = SetupPacket::parse(&setup);
 
-                    let mut request = vec![0u8; transfer_buffer_length as usize];
-                    cursor.read_exact(&mut request).await?;
+                    // if direction is out (0), read additional data.
+                    let request = if direction == 0 {
+                        let mut request_buffer = vec![0u8; transfer_buffer_length as usize];
+                        cursor.read_exact(&mut request_buffer).await?;
+                        request_buffer
+                    } else {
+                        vec![]
+                    };
 
                     let device = current_import_device.unwrap();
                     let real_ep = if direction == 0 { ep } else { ep | 0x80 };
                     let (usb_ep, intf) = device.find_ep(real_ep as u8).unwrap();
-
+                    trace!("->Endpoint {:02x?}", usb_ep);
+                    trace!("->Setup {:02x?}", setup);
                     let resp = device
                         .handle_urb(usb_ep, intf, setup_packet, request)
                         .await?;
-
-                    if usb_ep.address != 0x85 {
-                        trace!("Got USBIP_CMD_SUBMIT [{}]", current_pkt.sequence_number);
-                        trace!("NUMBER OF PACKETS {_number_of_packets}");
-                        trace!("->Endpoint {:02x?}", usb_ep);
-                        trace!("->Setup {:02x?}", setup);
-                        trace!("<-Resp {:02x?}", resp);
-                    }
+                    trace!("<-Resp {:02x?}", resp);
 
                     // USBIP_RET_SUBMIT
                     // command
-                    socket.write_u32(0x3).await?;
-                    socket.write_u32(current_pkt.sequence_number).await?;
-                    socket.write_u32(dev_id).await?;
-                    socket.write_u32(direction).await?;
-                    socket.write_u32(ep).await?;
+                    sock_writer.write_u32(0x3).await?;
+                    sock_writer.write_u32(current_pkt.sequence_number).await?;
+                    sock_writer.write_u32(dev_id).await?;
+                    sock_writer.write_u32(direction).await?;
+                    sock_writer.write_u32(ep).await?;
                     // status
-                    socket.write_u32(0).await?;
+                    sock_writer.write_u32(0).await?;
                     // actual length
-                    socket.write_u32(resp.len() as u32).await?;
+                    sock_writer.write_u32(resp.len() as u32).await?;
                     // start frame
-                    socket.write_u32(0).await?;
+                    sock_writer.write_u32(0).await?;
                     // number of packets
-                    socket.write_u32(0).await?;
+                    sock_writer.write_u32(0).await?;
                     // error count
-                    socket.write_u32(0).await?;
+                    sock_writer.write_u32(0).await?;
                     // setup
-                    socket.write_all(&setup).await?;
+                    sock_writer.write_all(&setup).await?;
                     // data
-                    socket.write_all(&resp).await?;
+                    sock_writer.write_all(&resp).await?;
+
+                    trace!("[W][END] CMD_SUBMIT")
                 }
                 UsbIpCommand::CmdUnlink => panic!("Did not expect unlink in packet reader."),
             }
