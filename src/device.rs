@@ -9,7 +9,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::io::Result;
 use std::sync::{Arc, Mutex};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncWriteExt};
 
 #[derive(Clone, Default)]
 pub struct Version {

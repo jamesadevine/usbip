@@ -1,6 +1,5 @@
 use crate::server::UsbIpServer;
 use crate::{SetupPacket, UsbIpCommand, UsbIpPacket};
-use byteorder::ByteOrder;
 use libc::ECONNRESET;
 use log::*;
 use std::io::{Cursor, ErrorKind, Result};
@@ -12,7 +11,7 @@ use tokio::time::sleep;
 
 pub async fn reader<T: AsyncReadExt + Unpin>(
     socket: &mut T,
-    server: Arc<UsbIpServer>,
+    _server: Arc<UsbIpServer>,
     packet_queue: Arc<Mutex<Vec<UsbIpPacket>>>,
 ) -> Result<()> {
     loop {
@@ -32,7 +31,7 @@ pub async fn reader<T: AsyncReadExt + Unpin>(
                 let status = socket.read_u32().await?;
                 packet_queue.lock().await.push(UsbIpPacket {
                     sequence_number: 0,
-                    status: status,
+                    status,
                     command: command.to_vec(),
                     enum_command: UsbIpCommand::ReqDevlist,
                     data: vec![],
@@ -45,7 +44,7 @@ pub async fn reader<T: AsyncReadExt + Unpin>(
                 socket.read_exact(&mut data).await?;
                 packet_queue.lock().await.push(UsbIpPacket {
                     sequence_number: 0,
-                    status: status,
+                    status,
                     command: command.to_vec(),
                     enum_command: UsbIpCommand::ReqImport,
                     data: data.to_vec(),
@@ -81,7 +80,7 @@ pub async fn reader<T: AsyncReadExt + Unpin>(
                     status: 0,
                     command: command.to_vec(),
                     enum_command: UsbIpCommand::CmdSubmit,
-                    data: data,
+                    data,
                 });
             }
             [0x00, 0x00, 0x00, 0x02] => {
@@ -158,8 +157,8 @@ pub async fn writer<T: AsyncWriteExt + Unpin>(
             socket.write_u32(ep).await?;
             socket.write_i32(status_code).await?;
 
-            let mut padding = [0u8; 6 * 4];
-            socket.write_all(&mut padding).await?;
+            let padding = [0u8; 6 * 4];
+            socket.write_all(&padding).await?;
         }
 
         let mut current_pkt = None;

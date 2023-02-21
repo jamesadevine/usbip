@@ -215,20 +215,20 @@ pub async fn server(addr: SocketAddr, server: UsbIpServer) {
         let usbip_server = Arc::new(server);
         loop {
             match listener.accept().await {
-                Ok((mut socket, _addr)) => {
+                Ok((socket, _addr)) => {
                     info!("Got connection from {:?}", socket.peer_addr());
 
                     let packet_queue: Arc<Mutex<Vec<UsbIpPacket>>> = Arc::new(Mutex::new(vec![]));
                     let new_server = usbip_server.clone();
                     let pqueue = packet_queue.clone();
                     let (mut sock_reader, mut sock_writer) = tokio::io::split(socket);
-                    let t = tokio::spawn(async move {
+                    let _t = tokio::spawn(async move {
                         let res = reader(&mut sock_reader, new_server, pqueue).await;
                         info!("Reader ended with {:?}", res);
                     });
                     let new_server = usbip_server.clone();
                     let pqueue = packet_queue.clone();
-                    let t1 = tokio::spawn(async move {
+                    let _t1 = tokio::spawn(async move {
                         let res = writer(&mut sock_writer, new_server, pqueue).await;
                         info!("Writer ended with {:?}", res);
                     });

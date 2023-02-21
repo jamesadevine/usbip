@@ -1,12 +1,12 @@
 use std::io::Result;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 
 pub(crate) async fn socket_write_fixed_string<T: AsyncWriteExt + Unpin>(
     socket: &mut T,
-    s: &String,
+    s: &str,
     len: usize,
 ) -> Result<()> {
-    let mut path = s.clone().into_bytes();
+    let mut path = s.to_owned().into_bytes();
     assert!(path.len() <= len);
     path.resize(len, 0);
     socket.write_all(&path).await
